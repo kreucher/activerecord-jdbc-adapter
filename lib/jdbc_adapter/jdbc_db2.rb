@@ -137,12 +137,7 @@ module JdbcSpec
     end
 
     def recreate_database(name)
-      do_not_drop = ["stmg_dbsize_info","hmon_atm_info","hmon_collection","policy"]
-      tables.each do |table|
-        unless do_not_drop.include?(table)
-          drop_table(table)
-        end
-      end
+      tables.each {|table| drop_table("#{db2_schema}.#{table}")}
     end
 
     def remove_index(table_name, options = { })
@@ -224,5 +219,24 @@ module JdbcSpec
       end
     end
 
+    def tables
+      @connection.tables(nil, db2_schema, nil, ["TABLE"])
+    end
+
+    private
+    def db2_schema
+      if @config[:schema].blank?
+        if @config[:url] =~ /^jdbc:as400:/
+          # AS400 implementation takes schema from library name (last part of url)
+          schema = @config[:url].split('/').last.strip
+          (schema[-1..-1] == ";") ? schema.chop : schema
+        else
+          # LUW implementation uses schema name of username by default
+          @config[:username] or ENV['USER']
+        end
+      else
+        @config[:schema]
+      end
+    end
   end
 end

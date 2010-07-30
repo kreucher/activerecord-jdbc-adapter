@@ -16,11 +16,6 @@ module JdbcSpec
          end }]
     end
 
-    def self.extended(obj)
-      # Ignore these 4 system tables
-      ActiveRecord::SchemaDumper.ignore_tables |= %w{hmon_atm_info hmon_collection policy stmg_dbsize_info}
-    end
-
     module Column
       def type_cast(value)
         return nil if value.nil? || value =~ /^\s*null\s*$/i
@@ -169,27 +164,40 @@ module JdbcSpec
       name.gsub(/"/,'""')
     end
 
-
     def structure_dump #:nodoc:
       definition=""
-      rs = @connection.connection.meta_data.getTables(nil,nil,nil,["TABLE"].to_java(:string))
+      rs = @connection.connection.meta_data.getTables(nil,db2_schema.upcase,nil,["TABLE"].to_java(:string))
       while rs.next
         tname = rs.getString(3)
         definition << "CREATE TABLE #{tname} (\n"
-        rs2 = @connection.connection.meta_data.getColumns(nil,nil,tname,nil)
+        rs2 = @connection.connection.meta_data.getColumns(nil,db2_schema.upcase,tname,nil)
         first_col = true
         while rs2.next
           col_name = add_quotes(rs2.getString(4));
           default = ""
           d1 = rs2.getString(13)
-          default = d1 ? " DEFAULT #{d1}" : ""
+          # IBM i (as400 toolbox driver) will return an empty string if there is no default
+          if @config[:url] =~ /^jdbc:as400:/
+            default = !d1.blank? ? " DEFAULT #{d1}" : ""
+          else
+            default = d1 ? " DEFAULT #{d1}" : ""
+          end
 
           type = rs2.getString(6)
-          col_size = rs2.getString(7)
+          col_precision = rs2.getString(7)
+          col_scale = rs2.getString(9)
+          # only these types have scale:
+          # http://publib.boulder.ibm.com/infocenter/db2luw/v9/topic/com.ibm.db2.udb.apdv.cli.doc/doc/r0006843.htm
+          if %w(DECIMAL NUMERIC TIMESTAMP).include?(type) and col_scale
+            col_size = "(#{col_precision},#{col_scale})"
+          elsif col_precision
+            col_size = "(#{col_precision})"
+          end
           nulling = (rs2.getString(18) == 'NO' ? " NOT NULL" : "")
           create_col_string = add_quotes(expand_double_quotes(strip_quotes(col_name))) +
             " " +
             type +
+            col_size +
             "" +
             nulling +
             default
